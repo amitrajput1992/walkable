@@ -40,12 +40,12 @@ const NPC: React.FC<NPCProps> = ({
     const bounds = navMeshRef.current.getNavMeshBounds();
     if (bounds) {
       // Define a smaller search radius for better local movement
-      const searchRadius = 50; // Smaller radius for more natural movement
+      const searchRadius = 30; // Reduced radius for more natural movement
       
       // Generate multiple random points and try to find a valid path
       let foundValidPath = false;
       let attempts = 0;
-      const maxAttempts = 15; // More attempts with smaller radius
+      const maxAttempts = 20; // More attempts to find valid positions
       
       while (!foundValidPath && attempts < maxAttempts) {
         // Generate random position using two approaches:
@@ -54,8 +54,8 @@ const NPC: React.FC<NPCProps> = ({
         
         let randomPosition;
         
-        if (attempts < 10) {
-          // Try local movement first (80% of attempts)
+        if (attempts < 15) {
+          // Try local movement first (75% of attempts)
           const angle = Math.random() * Math.PI * 2;
           const distance = 5 + Math.random() * searchRadius; // Minimum 5 units away
           
@@ -63,30 +63,45 @@ const NPC: React.FC<NPCProps> = ({
           const randomX = currentPosition.x + Math.cos(angle) * distance;
           const randomZ = currentPosition.z + Math.sin(angle) * distance;
           randomPosition = new THREE.Vector3(randomX, 0.5, randomZ);
+          
+          // Ensure the position is within bounds before pathfinding
+          if (bounds) {
+            randomPosition.x = Math.max(bounds.min.x + 2, Math.min(bounds.max.x - 2, randomPosition.x));
+            randomPosition.z = Math.max(bounds.min.z + 2, Math.min(bounds.max.z - 2, randomPosition.z));
+          }
         } else {
-          // Fall back to global movement within bounds
+          // Fall back to global movement within bounds (with margin)
           const { min, max } = bounds;
-          const randomX = min.x + Math.random() * (max.x - min.x);
-          const randomZ = min.z + Math.random() * (max.z - min.z);
+          // Add a small margin to ensure we're not right at the edge
+          const margin = 2;
+          const randomX = min.x + margin + Math.random() * (max.x - min.x - 2 * margin);
+          const randomZ = min.z + margin + Math.random() * (max.z - min.z - 2 * margin);
           randomPosition = new THREE.Vector3(randomX, 0.5, randomZ);
         }
         
-        // Try to find a path to this random position
-        try {
-          const path = navMeshRef.current.findPath(
-            currentPosition,
-            randomPosition
-          );
-          
-          // If a valid path is found, use it
-          if (path && path.length > 0) {
-            console.log("Found valid path to", randomPosition);
-            setDestination(randomPosition);
-            foundValidPath = true;
-            break;
+        // First check if the point is within the navmesh
+        const isInNavMesh = navMeshRef.current.isPointInNavMesh(randomPosition);
+        
+        if (isInNavMesh) {
+          // Try to find a path to this random position
+          try {
+            const path = navMeshRef.current.findPath(
+              currentPosition,
+              randomPosition
+            );
+            
+            // If a valid path is found, use it
+            if (path && path.length > 0) {
+              console.log("Found valid path to", randomPosition);
+              setDestination(randomPosition);
+              foundValidPath = true;
+              break;
+            }
+          } catch (error) {
+            console.error("Error finding path in pickRandomDestination:", error);
           }
-        } catch (error) {
-          console.error("Error finding path in pickRandomDestination:", error);
+        } else {
+          console.log("Random position outside navmesh, skipping", randomPosition);
         }
         
         attempts++;
@@ -209,9 +224,46 @@ const NPC: React.FC<NPCProps> = ({
     // Check if the new position is valid (on the navmesh) before moving
     if (navMeshRef.current) {
       const testPosition = new THREE.Vector3(newPosition.x, 0.5, newPosition.z);
-      const currentPathPoint = new THREE.Vector3(currentPosition.x, 0.5, currentPosition.z);
       
-      // Try to find a path from current to new position to verify it's walkable
+      // First check if the position is within navmesh bounds
+      const isInNavMesh = navMeshRef.current.isPointInNavMesh(testPosition);
+      
+      if (!isInNavMesh) {
+        // If outside bounds, recalculate path to stay within bounds
+        console.warn("NPC attempted to move outside navmesh bounds, recalculating path");
+        
+        // Get navmesh bounds
+        const bounds = navMeshRef.current.getNavMeshBounds();
+        if (bounds) {
+          // Clamp the position to the navmesh bounds
+          const clampedPosition = new THREE.Vector3(
+            Math.max(bounds.min.x, Math.min(bounds.max.x, testPosition.x)),
+            0.5,
+            Math.max(bounds.min.z, Math.min(bounds.max.z, testPosition.z))
+          );
+          
+          // Get current position for pathfinding
+          const currentPathPoint = new THREE.Vector3(currentPosition.x, 0.5, currentPosition.z);
+          
+          // Try to find a path to the clamped position
+          try {
+            const newPath = navMeshRef.current.findPath(currentPathPoint, clampedPosition);
+            if (newPath && newPath.length > 0) {
+              // Update the path with the new valid path
+              setPath(newPath);
+              return; // Skip this frame's movement
+            }
+          } catch (error) {
+            console.error("Error finding path to clamped position:", error);
+          }
+        }
+        
+        // If we couldn't find a valid path, just stop movement
+        return;
+      }
+      
+      // If in bounds, verify it's walkable with pathfinding
+      const currentPathPoint = new THREE.Vector3(currentPosition.x, 0.5, currentPosition.z);
       try {
         const testPath = navMeshRef.current.findPath(currentPathPoint, testPosition);
         
@@ -223,15 +275,40 @@ const NPC: React.FC<NPCProps> = ({
         } else {
           // If we can't path to the new position, it might be an obstacle
           console.log("NPC avoided obstacle");
+          
+          // Try to find a new path to the target
+          if (path.length > 1) {
+            const targetPoint = path[path.length - 1];
+            try {
+              const newPath = navMeshRef.current.findPath(currentPathPoint, targetPoint);
+              if (newPath && newPath.length > 0) {
+                setPath(newPath);
+              }
+            } catch (error) {
+              console.error("Error finding new path around obstacle:", error);
+            }
+          }
         }
       } catch (error) {
         // If pathfinding fails, still try to move but more cautiously
-        npcRef.current.position.x += (newPosition.x - npcRef.current.position.x) * 0.5;
-        npcRef.current.position.y = newPosition.y;
-        npcRef.current.position.z += (newPosition.z - npcRef.current.position.z) * 0.5;
+        // First check if the cautious move would be within bounds
+        const cautionFactor = 0.3; // More cautious than before
+        const cautionPosition = new THREE.Vector3()
+          .copy(currentPosition)
+          .add(direction.clone().multiplyScalar(actualMoveDistance * cautionFactor));
+        
+        if (navMeshRef.current.isPointInNavMesh(cautionPosition)) {
+          npcRef.current.position.x += (newPosition.x - npcRef.current.position.x) * cautionFactor;
+          npcRef.current.position.y = newPosition.y;
+          npcRef.current.position.z += (newPosition.z - npcRef.current.position.z) * cautionFactor;
+        } else {
+          // If even the cautious move is outside bounds, don't move
+          console.warn("NPC cannot move safely, staying in place");
+        }
       }
     } else {
       // If we don't have navmesh reference, just move directly
+      // This should rarely happen, but just in case
       npcRef.current.position.copy(newPosition);
     }
     

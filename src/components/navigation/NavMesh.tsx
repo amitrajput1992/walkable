@@ -63,6 +63,45 @@ const NavMesh = React.forwardRef<NavMeshRef, NavMeshProps>(
     const getNavMeshBounds = () => {
       return navMeshBounds;
     };
+    
+    // Check if a point is within the navmesh bounds
+    const isPointInNavMesh = (point: THREE.Vector3): boolean => {
+      if (!navMeshBounds) return false;
+      
+      const { min, max } = navMeshBounds;
+      
+      // Check if the point is within the XZ bounds of the navmesh
+      if (point.x < min.x || point.x > max.x || point.z < min.z || point.z > max.z) {
+        return false;
+      }
+      
+      // For more accurate checking, we can use the pathfinding system
+      try {
+        if (!pathfindingRef.current) return false;
+        
+        // Try to get the group ID for this point
+        const groupID = pathfindingRef.current.getGroup(zoneIdRef.current, point);
+        if (!groupID) return false;
+        
+        // Try to get the closest node
+        const closestNode = pathfindingRef.current.getClosestNode(
+          point,
+          zoneIdRef.current,
+          groupID
+        );
+        
+        // If we found a node and it's close enough, the point is on the navmesh
+        if (closestNode) {
+          const distance = point.distanceTo(closestNode.centroid);
+          return distance < 5; // Consider points within 5 units to be "on" the navmesh
+        }
+        
+        return false;
+      } catch (error) {
+        console.error("Error checking if point is in navmesh:", error);
+        return false;
+      }
+    };
 
     // Find a path between two points using three-pathfinding
     const findPath = (
@@ -76,7 +115,42 @@ const NavMesh = React.forwardRef<NavMeshRef, NavMeshProps>(
           return null;
         }
         
-        console.log("Finding path from", startPoint, "to", endPoint);
+        // Check if points are within navmesh bounds
+        const startInBounds = isPointInNavMesh(startPoint);
+        const endInBounds = isPointInNavMesh(endPoint);
+        
+        if (!startInBounds || !endInBounds) {
+          console.warn("Points outside navmesh bounds:", { 
+            startPoint, 
+            endPoint, 
+            startInBounds, 
+            endInBounds 
+          });
+          
+          // If start point is outside bounds, we need to find a valid start point
+          let validStartPoint = startPoint.clone();
+          let validEndPoint = endPoint.clone();
+          
+          if (!startInBounds && navMeshBounds) {
+            // Clamp start point to navmesh bounds
+            validStartPoint.x = Math.max(navMeshBounds.min.x, Math.min(navMeshBounds.max.x, startPoint.x));
+            validStartPoint.z = Math.max(navMeshBounds.min.z, Math.min(navMeshBounds.max.z, startPoint.z));
+            validStartPoint.y = 0.5; // Keep consistent Y value
+          }
+          
+          if (!endInBounds && navMeshBounds) {
+            // Clamp end point to navmesh bounds
+            validEndPoint.x = Math.max(navMeshBounds.min.x, Math.min(navMeshBounds.max.x, endPoint.x));
+            validEndPoint.z = Math.max(navMeshBounds.min.z, Math.min(navMeshBounds.max.z, endPoint.z));
+            validEndPoint.y = 0.5; // Keep consistent Y value
+          }
+          
+          // Use the clamped points
+          startPoint = validStartPoint;
+          endPoint = validEndPoint;
+          
+          console.log("Using clamped points:", { startPoint, endPoint });
+        }
         
         // Check if pathfinding is initialized
         if (!pathfindingRef.current) {
@@ -295,6 +369,7 @@ const NavMesh = React.forwardRef<NavMeshRef, NavMeshProps>(
       findPath,
       getNavmesh,
       getNavMeshBounds,
+      isPointInNavMesh,
     }));
     
     return (
