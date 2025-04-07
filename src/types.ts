@@ -16,6 +16,7 @@ export interface NavMeshRef {
     center: THREE.Vector3;
     size: THREE.Vector3;
   } | null;
+  isPointInNavMesh: (point: THREE.Vector3) => boolean;
 }
 
 // NPC Types
@@ -26,6 +27,15 @@ export interface NPCProps {
   color?: string;
   speed?: number;
   randomMovement?: boolean;
+}
+
+// Player Types
+export interface PlayerProps {
+  position?: [number, number, number];
+  navMeshRef: React.RefObject<NavMeshRef>;
+  color?: string;
+  speed?: number;
+  scale?: number;
 }
 
 export interface NPCData {

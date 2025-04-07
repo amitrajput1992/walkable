@@ -149,7 +149,7 @@ const NavMesh = React.forwardRef<NavMeshRef, NavMeshProps>(
           startPoint = validStartPoint;
           endPoint = validEndPoint;
           
-          console.log("Using clamped points:", { startPoint, endPoint });
+          console.info("Using clamped points:", { startPoint, endPoint });
         }
         
         // Check if pathfinding is initialized
@@ -297,7 +297,7 @@ const NavMesh = React.forwardRef<NavMeshRef, NavMeshProps>(
               // Store the bounds for external access
               const bounds = { min, max, center, size };
               setNavMeshBounds(bounds);
-              console.log("NavMesh bounds calculated:", bounds);
+              console.info("NavMesh bounds calculated:", bounds);
             }
           }
           
@@ -325,7 +325,7 @@ const NavMesh = React.forwardRef<NavMeshRef, NavMeshProps>(
                 scene.add(pathfindingHelperRef.current);
               }
               
-              console.log("Pathfinding initialized successfully");
+              console.info("Pathfinding initialized successfully");
             }
           } catch (error) {
             console.error("Error initializing pathfinding:", error);
@@ -346,7 +346,7 @@ const NavMesh = React.forwardRef<NavMeshRef, NavMeshProps>(
           createDebugHelpers();
         }
 
-        console.log("NavMesh initialized successfully");
+        console.info("NavMesh initialized successfully");
       } catch (error) {
         console.error("Error initializing NavMesh:", error);
       }
