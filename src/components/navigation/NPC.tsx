@@ -1,209 +1,254 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { useFrame } from '@react-three/fiber';
-import * as THREE from 'three';
-import { NPCProps } from '../../types';
+import React, { useRef, useState, useEffect, useCallback } from "react";
+import * as THREE from "three";
+import { useFrame } from "@react-three/fiber";
+import { NPCProps } from "../../types";
 
 const NPC: React.FC<NPCProps> = ({ 
   position = [0, 0, 0], 
   navMeshRef, 
   color = 'red', 
-  speed = 0.05,
-  randomMovement = false,
-  initialPosition = null
+  speed = 1.5,
+  randomMovement = false
 }) => {
   const npcRef = useRef<THREE.Group>(null);
   const [path, setPath] = useState<THREE.Vector3[]>([]);
-  const [currentPathIndex, setCurrentPathIndex] = useState<number>(0);
-  const [movementEnabled, setMovementEnabled] = useState<boolean>(false);
-  const timeToNextDestination = useRef<number>(Math.random() * 2 + 1); // 1-3 seconds
+  const [destination, setDestination] = useState<THREE.Vector3 | null>(null);
+  const [movementEnabled, setMovementEnabled] = useState(false);
+  const timeToNextDestination = useRef(Math.random() * 3 + 2); // 2-5 seconds
 
-  // Function to set a new destination and calculate path
-  const setDestination = useCallback((destination: THREE.Vector3) => {
-    if (!navMeshRef.current || !npcRef.current) {
-      console.warn('NavMesh or NPC reference not available');
-      return;
-    }
-    
-    // Get current position of the NPC
-    const start = new THREE.Vector3(
-      npcRef.current.position.x,
-      npcRef.current.position.y,
-      npcRef.current.position.z
-    );
-    
-    // Target destination
-    const end = new THREE.Vector3(destination.x, destination.y, destination.z);
-    
-    // Use the navmesh to find a path
-    try {
-      // Access the findPath method through the ref
-      if (typeof navMeshRef.current.findPath !== 'function') {
-        console.error('findPath is not a function on navMeshRef.current');
-        return;
-      }
-      
-      const newPath = navMeshRef.current.findPath(start, end);
-      
-      if (newPath && newPath.length > 0) {
-        setPath(newPath);
-        setCurrentPathIndex(0);
-      } else {
-        console.warn('No path found to destination');
-        // If no path is found, just create a direct path to the destination
-        // This is a fallback for debugging
-        setPath([start, end]);
-        setCurrentPathIndex(0);
-      }
-    } catch (error) {
-      console.error('Error finding path:', error);
+  // Set initial position when component mounts
+  useEffect(() => {
+    if (npcRef.current) {
+      // Set the NPC to the provided position
+      npcRef.current.position.set(
+        position[0], 
+        position[1], 
+        position[2]
+      );
     }
   }, []);
-  
-  // Function to pick a random destination within the actual navmesh bounds
+
+  // Function to pick a random destination within the navmesh
   const pickRandomDestination = useCallback(() => {
-    if (!npcRef.current || !navMeshRef.current) return;
+    if (!navMeshRef.current || !npcRef.current) return;
     
-    try {
-      // Get the current position of the NPC
-      const currentPosition = new THREE.Vector3();
-      npcRef.current.getWorldPosition(currentPosition);
-      
-      // Define a search radius for random destinations
-      const searchRadius = 20; // Adjust based on navmesh size
+    // Get the current position of the NPC
+    const currentPosition = new THREE.Vector3();
+    npcRef.current.getWorldPosition(currentPosition);
+    
+    // Try to get the navmesh bounds first for a more reliable approach
+    const bounds = navMeshRef.current.getNavMeshBounds();
+    if (bounds) {
+      // Define a smaller search radius for better local movement
+      const searchRadius = 50; // Smaller radius for more natural movement
       
       // Generate multiple random points and try to find a valid path
       let foundValidPath = false;
       let attempts = 0;
-      const maxAttempts = 10;
+      const maxAttempts = 15; // More attempts with smaller radius
       
       while (!foundValidPath && attempts < maxAttempts) {
-        // Generate random angle and distance within search radius
-        const randomAngle = Math.random() * Math.PI * 2;
-        const randomDistance = Math.random() * searchRadius;
+        // Generate random position using two approaches:
+        // 1. Local movement around current position
+        // 2. Global movement within navmesh bounds
         
-        // Calculate random point coordinates
-        const randomX = currentPosition.x + Math.cos(randomAngle) * randomDistance;
-        const randomZ = currentPosition.z + Math.sin(randomAngle) * randomDistance;
+        let randomPosition;
         
-        // Create a destination vector
-        const destination = new THREE.Vector3(randomX, 0, randomZ);
+        if (attempts < 10) {
+          // Try local movement first (80% of attempts)
+          const angle = Math.random() * Math.PI * 2;
+          const distance = 5 + Math.random() * searchRadius; // Minimum 5 units away
+          
+          // Calculate the random position
+          const randomX = currentPosition.x + Math.cos(angle) * distance;
+          const randomZ = currentPosition.z + Math.sin(angle) * distance;
+          randomPosition = new THREE.Vector3(randomX, 0.5, randomZ);
+        } else {
+          // Fall back to global movement within bounds
+          const { min, max } = bounds;
+          const randomX = min.x + Math.random() * (max.x - min.x);
+          const randomZ = min.z + Math.random() * (max.z - min.z);
+          randomPosition = new THREE.Vector3(randomX, 0.5, randomZ);
+        }
         
-        // Check if we can find a path to this destination
-        const path = navMeshRef.current.findPath(currentPosition, destination);
-        
-        if (path && path.length > 0) {
-          // We found a valid path, use this destination
-          setDestination(destination);
-          foundValidPath = true;
+        // Try to find a path to this random position
+        try {
+          const path = navMeshRef.current.findPath(
+            currentPosition,
+            randomPosition
+          );
+          
+          // If a valid path is found, use it
+          if (path && path.length > 0) {
+            console.log("Found valid path to", randomPosition);
+            setDestination(randomPosition);
+            foundValidPath = true;
+            break;
+          }
+        } catch (error) {
+          console.error("Error finding path in pickRandomDestination:", error);
         }
         
         attempts++;
       }
       
+      // If no valid path was found after all attempts, use a very simple approach
       if (!foundValidPath) {
-        // If we couldn't find a valid path after several attempts,
-        // just use the current position as destination to prevent getting stuck
-        console.warn('Could not find valid path after', maxAttempts, 'attempts');
-        setDestination(currentPosition);
+        console.warn("Could not find a valid random path after", maxAttempts, "attempts");
+        
+        // Just move a small distance in a random direction
+        const angle = Math.random() * Math.PI * 2;
+        const distance = 5; // Small safe distance
+        
+        const randomX = currentPosition.x + Math.cos(angle) * distance;
+        const randomZ = currentPosition.z + Math.sin(angle) * distance;
+        const fallbackPosition = new THREE.Vector3(randomX, 0.5, randomZ);
+        
+        setDestination(fallbackPosition);
       }
+    } else {
+      // No bounds available, use simple random movement
+      const angle = Math.random() * Math.PI * 2;
+      const distance = 10; // Small safe distance
       
-      // Reset the timer for the next random movement
-      timeToNextDestination.current = Math.random() * 3 + 2; // 2-5 seconds
-    } catch (error) {
-      console.error('Error in pickRandomDestination:', error);
+      const randomX = currentPosition.x + Math.cos(angle) * distance;
+      const randomZ = currentPosition.z + Math.sin(angle) * distance;
+      const fallbackPosition = new THREE.Vector3(randomX, 0.5, randomZ);
+      
+      setDestination(fallbackPosition);
     }
-  }, [setDestination]);
-  
-  // Function to start random movement
-  const startMovement = useCallback(() => {
-    setMovementEnabled(true);
-    pickRandomDestination();
-  }, [pickRandomDestination]);
-  
-  // Register the NPC with userData for scene-level interactions
+  }, [navMeshRef]);
+
+  // Update path when destination changes
   useEffect(() => {
-    if (npcRef.current) {
-      npcRef.current.userData.isNPC = true;
-      npcRef.current.userData.setDestination = setDestination;
-      npcRef.current.userData.startMovement = startMovement;
-    }
+    if (!destination || !npcRef.current || !navMeshRef.current) return;
     
-    return () => {
-      if (npcRef.current) {
-        delete npcRef.current.userData.isNPC;
-        delete npcRef.current.userData.setDestination;
-        delete npcRef.current.userData.startMovement;
+    // Get current position
+    const currentPosition = new THREE.Vector3();
+    npcRef.current.getWorldPosition(currentPosition);
+    
+    // Find path to destination
+    try {
+      const newPath = navMeshRef.current.findPath(currentPosition, destination);
+      
+      if (newPath && newPath.length > 0) {
+        setPath(newPath);
+      } else {
+        console.warn("No path found to destination");
+        // Try direct path as fallback
+        setPath([
+          new THREE.Vector3(currentPosition.x, 0.5, currentPosition.z),
+          new THREE.Vector3(destination.x, 0.5, destination.z)
+        ]);
       }
-    };
-  }, [startMovement, setDestination]);
-  
-  // Set up random movement if enabled
+    } catch (error) {
+      console.error("Error finding path:", error);
+    }
+  }, [destination, navMeshRef]);
+
+  // Start random movement when enabled
   useEffect(() => {
-    if (randomMovement && npcRef.current && movementEnabled) {
-      // Initial random destination
+    if (randomMovement && movementEnabled) {
       pickRandomDestination();
     }
   }, [randomMovement, pickRandomDestination, movementEnabled]);
-  
-  // Update position when initialPosition changes (first click)
+
+  // Expose functions to the parent component
   useEffect(() => {
-    if (initialPosition && npcRef.current) {
-      // Set the NPC to the initial position
-      npcRef.current.position.set(
-        initialPosition.x, 
-        0.5, 
-        initialPosition.z
-      );
+    if (npcRef.current) {
+      npcRef.current.userData.isNPC = true;
+      npcRef.current.userData.startMovement = () => {
+        setMovementEnabled(true);
+        if (randomMovement) {
+          pickRandomDestination();
+        }
+      };
     }
-  }, [initialPosition]);
-  
+  }, [randomMovement, pickRandomDestination]);
+
   // Move along the path and handle random movement
-  useFrame((_, delta) => { // Rename state to _ since it's unused
-    if (!npcRef.current || !movementEnabled) return;
+  useFrame((_, delta) => {
+    if (!npcRef.current || !movementEnabled || path.length === 0) return;
     
-    // Handle random movement
-    if (randomMovement) {
-      timeToNextDestination.current -= delta;
-      
-      // If we've reached the end of the path or it's time for a new destination
-      if ((path.length === 0 || currentPathIndex >= path.length) || 
-          timeToNextDestination.current <= 0) {
-        pickRandomDestination();
-      }
-    }
+    // Get the current position of the NPC
+    const currentPosition = new THREE.Vector3();
+    npcRef.current.getWorldPosition(currentPosition);
     
-    // Skip movement if no path or reached the end
-    if (path.length === 0 || currentPathIndex >= path.length) return;
-    
-    const currentPosition = npcRef.current.position;
-    const targetPosition = path[currentPathIndex];
+    // Get the next point in the path
+    const targetPoint = path[0];
     
     // Calculate direction and distance to the next point
-    const direction = new THREE.Vector3();
-    direction.subVectors(targetPosition, currentPosition);
-    const distance = direction.length();
+    const direction = new THREE.Vector3().subVectors(targetPoint, currentPosition).normalize();
+    const distance = currentPosition.distanceTo(targetPoint);
     
-    // If we're close enough to the target, move to the next point
-    if (distance < 0.1) {
-      setCurrentPathIndex(prev => prev + 1);
+    // If we're close enough to the next point, remove it from the path
+    if (distance < 0.5) {
+      path.shift();
+      
+      // If we've reached the end of the path, pick a new destination if random movement is enabled
+      if (path.length === 0 && randomMovement) {
+        // Add a small delay before picking a new destination to prevent constant movement
+        setTimeout(() => {
+          pickRandomDestination();
+        }, 1000 + Math.random() * 2000); // Random delay between 1-3 seconds
+      }
+      
       return;
     }
     
-    // Normalize the direction and move the NPC
-    direction.normalize();
+    // Move towards the next point with smoothing to prevent jitter
+    const moveDistance = speed * delta;
     
-    // Calculate the movement distance based on speed and delta time
-    // This ensures consistent movement speed regardless of frame rate
-    const movementDistance = speed * delta;
+    // Limit the move distance to prevent overshooting
+    const actualMoveDistance = Math.min(moveDistance, distance * 0.8);
     
-    // Move the NPC towards the target
-    npcRef.current.position.x += direction.x * movementDistance;
-    npcRef.current.position.z += direction.z * movementDistance;
+    const newPosition = new THREE.Vector3()
+      .copy(currentPosition)
+      .add(direction.multiplyScalar(actualMoveDistance));
     
-    // Rotate the NPC to face the direction of movement
+    // Check if the new position is valid (on the navmesh) before moving
+    if (navMeshRef.current) {
+      const testPosition = new THREE.Vector3(newPosition.x, 0.5, newPosition.z);
+      const currentPathPoint = new THREE.Vector3(currentPosition.x, 0.5, currentPosition.z);
+      
+      // Try to find a path from current to new position to verify it's walkable
+      try {
+        const testPath = navMeshRef.current.findPath(currentPathPoint, testPosition);
+        
+        if (testPath && testPath.length > 0) {
+          // Update position if the path is valid with smoothing
+          npcRef.current.position.x += (newPosition.x - npcRef.current.position.x) * 0.8;
+          npcRef.current.position.y = newPosition.y; // Keep Y position exact
+          npcRef.current.position.z += (newPosition.z - npcRef.current.position.z) * 0.8;
+        } else {
+          // If we can't path to the new position, it might be an obstacle
+          console.log("NPC avoided obstacle");
+        }
+      } catch (error) {
+        // If pathfinding fails, still try to move but more cautiously
+        npcRef.current.position.x += (newPosition.x - npcRef.current.position.x) * 0.5;
+        npcRef.current.position.y = newPosition.y;
+        npcRef.current.position.z += (newPosition.z - npcRef.current.position.z) * 0.5;
+      }
+    } else {
+      // If we don't have navmesh reference, just move directly
+      npcRef.current.position.copy(newPosition);
+    }
+    
+    // Rotate to face the direction of movement with smoothing
     if (direction.length() > 0.001) {
-      const angle = Math.atan2(direction.x, direction.z);
-      npcRef.current.rotation.y = angle;
+      const targetRotation = Math.atan2(direction.x, direction.z);
+      
+      // Smooth rotation
+      let currentRotation = npcRef.current.rotation.y;
+      
+      // Normalize the angle difference to between -PI and PI
+      let angleDiff = targetRotation - currentRotation;
+      while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+      while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+      
+      // Apply smooth rotation
+      npcRef.current.rotation.y += angleDiff * 0.1;
     }
   });
   

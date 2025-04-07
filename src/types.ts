@@ -10,6 +10,12 @@ export interface NavMeshProps {
 export interface NavMeshRef {
   findPath: (startPoint: THREE.Vector3, endPoint: THREE.Vector3) => THREE.Vector3[] | null;
   getNavmesh: () => THREE.Mesh | null;
+  getNavMeshBounds: () => {
+    min: THREE.Vector3;
+    max: THREE.Vector3;
+    center: THREE.Vector3;
+    size: THREE.Vector3;
+  } | null;
 }
 
 // NPC Types
@@ -20,7 +26,6 @@ export interface NPCProps {
   color?: string;
   speed?: number;
   randomMovement?: boolean;
-  initialPosition?: THREE.Vector3 | null;
 }
 
 export interface NPCData {
