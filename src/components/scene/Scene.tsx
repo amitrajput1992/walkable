@@ -1,6 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useThree } from '@react-three/fiber';
-import { OrbitControls, Environment, Grid } from '@react-three/drei';
+import { OrbitControls, Environment, Grid, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
 import NavMesh from '../navigation/NavMesh';
 import Model from '../scene/Model';
@@ -67,8 +67,16 @@ const Scene: React.FC<SceneProps> = ({ debug = false }) => {
 
   return (
     <>
-      {/* Controls */}
-      <OrbitControls makeDefault />
+      <PerspectiveCamera makeDefault position={[-10, 35, -10]} />
+      {/* Controls - centered on the model */}
+      <OrbitControls 
+        target={[20, 10, -30]} // Target the center where the model is positioned
+        enableDamping={true}
+        dampingFactor={0.25}
+        minDistance={5}
+        maxDistance={100}
+        maxPolarAngle={Math.PI / 2} // Limit vertical rotation to prevent going below the ground
+      />
       
       {/* Environment and Lighting */}
       <Environment preset="city" />
@@ -92,28 +100,13 @@ const Scene: React.FC<SceneProps> = ({ debug = false }) => {
           <NPC 
             key={npc.id}
             position={npc.position} 
-            navMeshRef={navMeshRef} 
+            navMeshRef={navMeshRef as React.RefObject<NavMeshRef>} 
             color={npc.color}
             speed={npc.speed}
             randomMovement={simulationStarted}
             initialPosition={initialClickPosition}
           />
         ))}
-        
-        {/* Obstacles */}
-        {/* {createObstacle([0, 1, 0], [4, 2, 4], 'darkgray')}
-        {createObstacle([-6, 1, 6], [2, 2, 2], 'darkgray')}
-        {createObstacle([6, 1, -6], [2, 2, 2], 'darkgray')} */}
-        
-        {/* Ground - clickable to set NPC destination */}
-        {/* <mesh 
-          rotation={[-Math.PI / 2, 0, 0]} 
-          receiveShadow
-          onClick={handleGroundClick}
-        >
-          <planeGeometry args={[20, 20]} />
-          <meshStandardMaterial color="#f0f0f0" />
-        </mesh> */}
         
         {/* Debug Grid */}
         {debug && <Grid infiniteGrid fadeDistance={50} fadeStrength={5} />}

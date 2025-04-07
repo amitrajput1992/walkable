@@ -20,6 +20,7 @@ export interface NPCProps {
   color?: string;
   speed?: number;
   randomMovement?: boolean;
+  initialPosition?: THREE.Vector3 | null;
 }
 
 export interface NPCData {
